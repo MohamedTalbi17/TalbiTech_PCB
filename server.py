@@ -7,7 +7,6 @@ import shutil
 
 app = Flask(__name__)
 CORS(app)
-
 def get_dimensions(zip_path):
     extract_folder = 'gerber_extracted'
     if os.path.exists(extract_folder):
@@ -17,24 +16,22 @@ def get_dimensions(zip_path):
     with zipfile.ZipFile(zip_path, 'r') as z:
         z.extractall(extract_folder)
 
-    # Count layers
-    top_layer    = any(f.upper().endswith('.GTL') for f in os.listdir(extract_folder))
-    bottom_layer = any(f.upper().endswith('.GBL') for f in os.listdir(extract_folder))
-    
-    if top_layer and bottom_layer:
-        layers = 2
-    else:
-        layers = 1
+    files = os.listdir(extract_folder)
 
-    # Find outline file
+    # count layers
+    top    = any(f.upper().endswith('.GTL') for f in files)
+    bottom = any(f.upper().endswith('.GBL') for f in files)
+    layers = 2 if (top and bottom) else 1
+
+    # find outline
     outline_file = None
-    for filename in os.listdir(extract_folder):
+    for filename in files:
         if filename.upper().endswith('.GKO'):
             outline_file = os.path.join(extract_folder, filename)
             break
 
     if not outline_file:
-        return None, None, layers
+        return None, None, layers, 'no_outline'
 
     with open(outline_file, 'r') as f:
         content = f.read()
@@ -57,38 +54,38 @@ def get_dimensions(zip_path):
                 y_coords.append(int(match.group(2)) / divisor)
 
     if not x_coords:
-        return None, None, layers
+        return None, None, layers, 'no_coords'
 
     width  = round(max(x_coords) - min(x_coords), 2)
     height = round(max(y_coords) - min(y_coords), 2)
-    return width, height, layers
+    return width, height, layers, None
 
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    print('--- Request received ---')
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
 
         file = request.files['file']
+
+        if not file.filename.lower().endswith('.zip'):
+            return jsonify({'error': 'not_zip'}), 400
+
         zip_path = 'uploaded.zip'
         file.save(zip_path)
-        print(f'File saved: {file.filename}')
 
-        width, height, layers = get_dimensions(zip_path)
-        print(f'Dimensions: {width} x {height} mm | Layers: {layers}')
+        width, height, layers, err = get_dimensions(zip_path)
 
-        if width is None:
-            return jsonify({'error': 'Could not read .GKO outline file'}), 400
+        if err:
+            return jsonify({'error': err}), 400
 
         return jsonify({'width': width, 'height': height, 'layers': layers})
 
     except Exception as e:
         print(f'ERROR: {e}')
         return jsonify({'error': str(e)}), 500
-
-
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
