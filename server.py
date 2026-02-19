@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 
-
 app = Flask(__name__)
 CORS(app)
 
@@ -18,6 +17,16 @@ def get_dimensions(zip_path):
     with zipfile.ZipFile(zip_path, 'r') as z:
         z.extractall(extract_folder)
 
+    # Count layers
+    top_layer    = any(f.upper().endswith('.GTL') for f in os.listdir(extract_folder))
+    bottom_layer = any(f.upper().endswith('.GBL') for f in os.listdir(extract_folder))
+    
+    if top_layer and bottom_layer:
+        layers = 2
+    else:
+        layers = 1
+
+    # Find outline file
     outline_file = None
     for filename in os.listdir(extract_folder):
         if filename.upper().endswith('.GKO'):
@@ -25,7 +34,7 @@ def get_dimensions(zip_path):
             break
 
     if not outline_file:
-        return None, None
+        return None, None, layers
 
     with open(outline_file, 'r') as f:
         content = f.read()
@@ -48,11 +57,11 @@ def get_dimensions(zip_path):
                 y_coords.append(int(match.group(2)) / divisor)
 
     if not x_coords:
-        return None, None
+        return None, None, layers
 
     width  = round(max(x_coords) - min(x_coords), 2)
     height = round(max(y_coords) - min(y_coords), 2)
-    return width, height
+    return width, height, layers
 
 
 @app.route('/analyze', methods=['POST'])
@@ -67,13 +76,13 @@ def analyze():
         file.save(zip_path)
         print(f'File saved: {file.filename}')
 
-        width, height = get_dimensions(zip_path)
-        print(f'Dimensions: {width} x {height} mm')
+        width, height, layers = get_dimensions(zip_path)
+        print(f'Dimensions: {width} x {height} mm | Layers: {layers}')
 
         if width is None:
             return jsonify({'error': 'Could not read .GKO outline file'}), 400
 
-        return jsonify({'width': width, 'height': height})
+        return jsonify({'width': width, 'height': height, 'layers': layers})
 
     except Exception as e:
         print(f'ERROR: {e}')
@@ -83,4 +92,3 @@ def analyze():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
-
